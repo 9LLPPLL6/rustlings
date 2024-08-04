@@ -1,64 +1,41 @@
-use std::{sync::mpsc, thread, time::Duration};
+// Building on the last exercise, we want all of the threads to complete their
+// work. But this time, the spawned threads need to be in charge of updating a
+// shared value: `JobStatus.jobs_done`
 
-struct Queue {
-    length: u32,
-    first_half: Vec<u32>,
-    second_half: Vec<u32>,
-}
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
-impl Queue {
-    fn new() -> Self {
-        Self {
-            length: 10,
-            first_half: vec![1, 2, 3, 4, 5],
-            second_half: vec![6, 7, 8, 9, 10],
-        }
-    }
-}
-
-fn send_tx(q: Queue, tx: mpsc::Sender<u32>) {
-    // TODO: We want to send `tx` to both threads. But currently, it is moved
-    // into the first thread. How could you solve this problem?
-    thread::spawn(move || {
-        for val in q.first_half {
-            println!("Sending {val:?}");
-            tx.send(val).unwrap();
-            thread::sleep(Duration::from_millis(250));
-        }
-    });
-
-    thread::spawn(move || {
-        for val in q.second_half {
-            println!("Sending {val:?}");
-            tx.send(val).unwrap();
-            thread::sleep(Duration::from_millis(250));
-        }
-    });
+struct JobStatus {
+    jobs_done: u32,
 }
 
 fn main() {
-    // You can optionally experiment here.
-}
+    // `Arc` isn't enough if you want a **mutable** shared state.
+    // We need to wrap the value with a `Mutex`.
+    let status = Arc::new(Mutex::new(JobStatus { jobs_done: 0 }));
+    //                    ^^^^^^^^^^^                          ^
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    let mut handles = Vec::new();
+    for _ in 0..10 {
+        let status_shared = Arc::clone(&status);
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
 
-    #[test]
-    fn threads3() {
-        let (tx, rx) = mpsc::channel();
-        let queue = Queue::new();
-        let queue_length = queue.length;
-
-        send_tx(queue, tx);
-
-        let mut total_received: u32 = 0;
-        for received in rx {
-            println!("Got: {received}");
-            total_received += 1;
-        }
-
-        println!("Number of received values: {total_received}");
-        assert_eq!(total_received, queue_length);
+            // Lock before you update a shared value.
+            status_shared.lock().unwrap().jobs_done += 1;
+            //           ^^^^^^^^^^^^^^^^
+        });
+        handles.push(handle);
     }
+
+    // Waiting for all jobs to complete.
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    println!("Jobs done: {}", status.lock().unwrap().jobs_done);
+    //                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 }
